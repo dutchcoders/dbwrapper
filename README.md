@@ -51,3 +51,20 @@ Transaction, will rollback when an error is being returned.
         }
     })
 ```
+
+
+## Contributions
+
+Contributions are welcome.
+
+## Creators
+
+**Remco Verhoef**
+- <https://twitter.com/remco_verhoef>
+- <https://twitter.com/dutchcoders>
+
+## Copyright and license
+
+Code and documentation copyright 2011-2014 Remco Verhoef.
+
+Code released under [the MIT license](LICENSE).
