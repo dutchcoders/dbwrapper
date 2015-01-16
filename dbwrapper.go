@@ -3,6 +3,7 @@ package dbwrapper
 import (
 	"database/sql"
 	"log"
+	"reflect"
 	"time"
 )
 
@@ -65,7 +66,7 @@ type Tx struct {
 	*sql.Tx
 }
 
-func (tx *Tx) withStmt(query string, fn func(stmt *Stmt) error) error {
+func (tx *Tx) WithStmt(query string, fn func(stmt *Stmt) error) error {
 	began := time.Now()
 
 	stmt, err := tx.Prepare(query)
@@ -86,7 +87,7 @@ type Stmt struct {
 	*sql.Stmt
 }
 
-func (stmt *Stmt) Query(rowFn func(rows *sql.Rows) error, args ...interface{}) error {
+func (stmt *Stmt) Query(rowFn func(rows *Rows) error, args ...interface{}) error {
 	var rows *sql.Rows
 	var err error
 
@@ -97,7 +98,7 @@ func (stmt *Stmt) Query(rowFn func(rows *sql.Rows) error, args ...interface{}) e
 	defer rows.Close()
 
 	for rows.Next() {
-		err = rowFn(rows)
+		err = rowFn(&Rows{rows})
 
 		if err != nil {
 			return err
@@ -105,4 +106,38 @@ func (stmt *Stmt) Query(rowFn func(rows *sql.Rows) error, args ...interface{}) e
 	}
 
 	return nil
+}
+
+type Rows struct {
+	*sql.Rows
+}
+
+func (rs *Rows) Scan(dest ...interface{}) error {
+
+	var columns []string
+	var err error
+	columns, err = rs.Rows.Columns()
+	if err != nil {
+		return err
+	}
+
+	o := dest[0]
+	st := reflect.TypeOf(o).Elem()
+	if st.Kind() == reflect.Struct {
+		// check for pointer of struct
+		dest = make([]interface{}, len(columns))
+		for j := 0; j < len(columns); j++ {
+			for i := 0; i < st.NumField(); i++ {
+				field := st.Field(i)
+				tag := field.Tag.Get("sql")
+				if tag != columns[j] {
+					continue
+				}
+				dest[j] = reflect.ValueOf(o).Elem().Field(i).Addr().Interface()
+			}
+		}
+	}
+
+	err = rs.Rows.Scan(dest...)
+	return err
 }
