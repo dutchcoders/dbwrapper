@@ -2,6 +2,7 @@ package dbwrapper
 
 import (
 	"database/sql"
+	"errors"
 	"log"
 	"reflect"
 	"time"
@@ -108,12 +109,89 @@ func (stmt *Stmt) Query(rowFn func(rows *Rows) error, args ...interface{}) error
 	return nil
 }
 
+func (stmt *Stmt) QueryRow(args ...interface{}) *Row {
+	rows, err := stmt.Stmt.Query(args...)
+	if err != nil {
+		return &Row{err: err}
+	}
+	return &Row{rows: rows}
+}
+
+func (db *DB) QueryRow(query string, args ...interface{}) *Row {
+	rows, err := db.Query(query, args...)
+	return &Row{rows: rows, err: err}
+}
+
+type Row struct {
+	//	*sql.Row
+	err  error // deferred error for easy chaining
+	rows *sql.Rows
+}
+
+func (r *Row) Scan(dest ...interface{}) error {
+	if r.err != nil {
+		return r.err
+	}
+
+	var columns []string
+	var err error
+	columns, err = r.rows.Columns()
+	if err != nil {
+		log.Println(r, err)
+		return err
+	}
+
+	o := dest[0]
+	st := reflect.TypeOf(o).Elem()
+	if st.Kind() == reflect.Struct {
+		// check for pointer of struct
+		dest = make([]interface{}, len(columns))
+		for j := 0; j < len(columns); j++ {
+			for i := 0; i < st.NumField(); i++ {
+				field := st.Field(i)
+				tag := field.Tag.Get("sql")
+				if tag != columns[j] {
+					continue
+				}
+				dest[j] = reflect.ValueOf(o).Elem().Field(i).Addr().Interface()
+			}
+		}
+	}
+
+	defer r.rows.Close()
+	for _, dp := range dest {
+		if _, ok := dp.(*sql.RawBytes); ok {
+			return errors.New("sql: RawBytes isn't allowed on Row.Scan")
+		}
+	}
+
+	if !r.rows.Next() {
+		if err := r.rows.Err(); err != nil {
+			return err
+		}
+		return sql.ErrNoRows
+	}
+
+	err = r.rows.Scan(dest...)
+	if err != nil {
+		return err
+	}
+	// Make sure the query can be processed to completion with no errors.
+	if err := r.rows.Close(); err != nil {
+		return err
+	}
+
+	return nil
+
+	// err = r.Row.Scan(dest...)
+	return nil
+}
+
 type Rows struct {
 	*sql.Rows
 }
 
 func (rs *Rows) Scan(dest ...interface{}) error {
-
 	var columns []string
 	var err error
 	columns, err = rs.Rows.Columns()

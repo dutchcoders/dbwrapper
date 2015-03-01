@@ -31,6 +31,38 @@ Simple query
     }
 ```
 
+Simple query with object
+```
+    db, err := dbwrapper.Open("mysql", config.DSN)
+    if err != nil {
+        panic(err.Error())
+    }
+
+    type Comment struct {
+        Body string `sql:"Body" json:"body"`
+        Date *time.Time `sql:"Date" json:"date"`
+    }
+
+    qwy := "SELECT body, date FROM comments WHERE objectid=? AND active=1 ORDER BY date DESC"
+    err = db.WithStmt(qry, func(stmt *dbwrapper.Stmt) error {
+        err = stmt.Query(func(rows *sql.Rows) error {
+            var comment Comment
+            if err := rows.Scan(&comment); err != nil {
+                return err
+            }
+
+            response.Comments = append(response.Comments, comment)
+            return nil
+        }, response.ObjectId)
+        return nil
+    })
+
+    if err != nil {
+        log.Println(err)
+        return
+    }
+```
+
 Transaction, will rollback when an error is being returned.
 
 ```
