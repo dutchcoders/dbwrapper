@@ -3,6 +3,7 @@ package dbwrapper
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"reflect"
 	"time"
@@ -128,6 +129,65 @@ type Row struct {
 	rows *sql.Rows
 }
 
+func find(values []string, value string) int {
+	for i, v := range values {
+		if v != value {
+			continue
+		}
+
+		return i
+	}
+
+	return -1
+}
+
+func mapColumns(dest []interface{}, o interface{}, columns []string, prefix string, j *int) error {
+	oType := reflect.TypeOf(o)
+	if oType.Kind() == reflect.Ptr {
+		oType = oType.Elem()
+	}
+
+	oValue := reflect.ValueOf(o)
+	if oValue.Kind() == reflect.Ptr {
+		oValue = oValue.Elem()
+	}
+
+	switch oType.Kind() {
+	case reflect.Struct:
+		for i := 0; i < oType.NumField(); i++ {
+			fType := oType.Field(i)
+			fValue := oValue.Field(i)
+
+			child := fValue.Addr().Interface()
+			switch fValue.Kind() {
+			case reflect.Struct:
+				if err := mapColumns(dest, child, columns, "", j); err != nil {
+					return err
+				}
+			default:
+				tag := fType.Tag.Get("sql")
+				if -1 == find(columns, tag) {
+					return fmt.Errorf("Could not find column '%s'.\n", tag)
+				}
+
+				dest[*j] = child
+				*j++
+			}
+		}
+	case reflect.Slice:
+		for i := 0; i < oValue.Len(); i++ {
+			if err := mapColumns(dest, oValue.Index(i).Interface(), columns, "", j); err != nil {
+				return err
+			}
+		}
+	default:
+		dest[*j] = o
+		*j++
+	}
+
+	return nil
+}
+
 func (r *Row) Scan(dest ...interface{}) error {
 	if r.err != nil {
 		return r.err
@@ -141,22 +201,9 @@ func (r *Row) Scan(dest ...interface{}) error {
 		return err
 	}
 
-	o := dest[0]
-	st := reflect.TypeOf(o).Elem()
-	if st.Kind() == reflect.Struct {
-		// check for pointer of struct
-		dest = make([]interface{}, len(columns))
-		for j := 0; j < len(columns); j++ {
-			for i := 0; i < st.NumField(); i++ {
-				field := st.Field(i)
-				tag := field.Tag.Get("sql")
-				if tag != columns[j] {
-					continue
-				}
-				dest[j] = reflect.ValueOf(o).Elem().Field(i).Addr().Interface()
-			}
-		}
-	}
+	dest2 := make([]interface{}, len(columns))
+	i := 0
+	err = mapColumns(dest2, dest, columns, "", &i)
 
 	defer r.rows.Close()
 	for _, dp := range dest {
@@ -182,9 +229,6 @@ func (r *Row) Scan(dest ...interface{}) error {
 	}
 
 	return nil
-
-	// err = r.Row.Scan(dest...)
-	return nil
 }
 
 type Rows struct {
@@ -199,23 +243,12 @@ func (rs *Rows) Scan(dest ...interface{}) error {
 		return err
 	}
 
-	o := dest[0]
-	st := reflect.TypeOf(o).Elem()
-	if st.Kind() == reflect.Struct {
-		// check for pointer of struct
-		dest = make([]interface{}, len(columns))
-		for j := 0; j < len(columns); j++ {
-			for i := 0; i < st.NumField(); i++ {
-				field := st.Field(i)
-				tag := field.Tag.Get("sql")
-				if tag != columns[j] {
-					continue
-				}
-				dest[j] = reflect.ValueOf(o).Elem().Field(i).Addr().Interface()
-			}
-		}
+	i := 0
+	dest2 := make([]interface{}, len(columns))
+	if err = mapColumns(dest2, dest, columns, "", &i); err != nil {
+		return err
 	}
 
-	err = rs.Rows.Scan(dest...)
+	err = rs.Rows.Scan(dest2...)
 	return err
 }

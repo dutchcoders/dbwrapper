@@ -31,7 +31,7 @@ Simple query
     }
 ```
 
-Simple query with object
+Simple query with (nested) object
 ```
     db, err := dbwrapper.Open("mysql", config.DSN)
     if err != nil {
@@ -39,22 +39,27 @@ Simple query with object
     }
 
     type Comment struct {
-        Body string `sql:"Body" json:"body"`
-        Date *time.Time `sql:"Date" json:"date"`
+        Body string     `sql:"body"`
+        Date *time.Time `sql:"date"`
+        User struct {
+            Name string `sql:"user_name"`
+        }
     }
 
-    qwy := "SELECT body, date FROM comments WHERE objectid=? AND active=1 ORDER BY date DESC"
-    err = db.WithStmt(qry, func(stmt *dbwrapper.Stmt) error {
-        err = stmt.Query(func(rows *sql.Rows) error {
+    comments := []Comment{}
+
+    qry := "SELECT body, date, u.name as user_name FROM comments c INNER JOIN users u ON c.userid=u.userid"
+    err = db.WithStmt(qry, func(stmt *Stmt) error {
+        err = stmt.Query(func(rows *Rows) error {
             var comment Comment
-            if err := rows.Scan(&comment); err != nil {
+            if err := rows.Scan(&comment.Body, &comment.Date, &comment.User.Name); err != nil {
                 return err
             }
 
-            response.Comments = append(response.Comments, comment)
+            comments = append(comments, comment)
             return nil
-        }, response.ObjectId)
-        return nil
+        })
+        return err
     })
 
     if err != nil {
